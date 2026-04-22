@@ -1,0 +1,75 @@
+{
+  "data_quality": {
+    "mmd_score": 0.012710124254226685,
+    "kld_scores": [
+      1.7032314612757484,
+      1.4802922916991116e-17,
+      18.909073856218193,
+      2.1806283722825266,
+      1.4767503731189129,
+      1.7405492952580548,
+      0.9254770007460033,
+      1.9427758423113366,
+      2.521053324178389,
+      2.2984096544024535,
+      2.385421032067617,
+      3.700743415362263e-18,
+      1.2219623115779003e-18,
+      -6.681403123445835e-16,
+      7.401455318693314e-18,
+      2.5620784899752564,
+      2.7038747573046056,
+      3.700743415362263e-18,
+      10.352032324798088
+    ],
+    "average_kld": 2.7211239886282725,
+    "correlation_similarity": 0.42203047226257945
+  },
+  "physics_constraints": {
+    "real_data": {
+      "dose_strength": {
+        "monotonicity_score": 0.4915966386554622,
+        "violation_count": 121,
+        "total_comparisons": 238,
+        "spearman_correlation": -0.44293230557168817,
+        "spearman_p_value": 6.627634349144282e-13,
+        "expected_trend": "decreasing",
+        "actual_trend": "decreasing"
+      },
+      "temperature_effect": {
+        "pearson_correlation": -0.25380118101731597,
+        "pearson_p_value": 7.239597471198067e-05,
+        "spearman_correlation": -0.44293230557168817,
+        "spearman_p_value": 6.627634349144282e-13,
+        "negative_trend_score": 0.6666666666666666,
+        "expected_effect": "negative"
+      },
+      "overall_physics_score": 0.5791316526610644
+    },
+    "synthetic_data": {
+      "dose_strength": {
+        "monotonicity_score": 0.5294117647058824,
+        "violation_count": 112,
+        "total_comparisons": 238,
+        "spearman_correlation": -0.1483659154038184,
+        "spearman_p_value": 0.021769321635512477,
+        "expected_trend": "decreasing",
+        "actual_trend": "decreasing"
+      },
+      "temperature_effect": {
+        "pearson_correlation": -0.13376296280472388,
+        "pearson_p_value": 0.03879273310303688,
+        "spearman_correlation": -0.1483659154038184,
+        "spearman_p_value": 0.021769321635512477,
+        "negative_trend_score": 1.0,
+        "expected_effect": "negative"
+      },
+      "overall_physics_score": 0.7647058823529411
+    }
+  },
+  "visualization_files": {
+    "distribution_comparison": "results/figures\\distribution_comparison.png",
+    "correlation_matrices": "results/figures\\correlation_matrices.png",
+    "physics_validation": "results/figures\\physics_constraint_validation.png"
+  }
+}

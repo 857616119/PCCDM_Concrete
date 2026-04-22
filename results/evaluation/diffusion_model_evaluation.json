@@ -1,0 +1,70 @@
+{
+  "statistics": {
+    "mean_abs_error": 0.6345171928405762,
+    "std_abs_error": 0.6916962265968323,
+    "correlation_similarity": 0.8896128551274747,
+    "real_mean": [
+      -0.38536301255226135,
+      0.5852575898170471,
+      0.26104554533958435,
+      -0.25221237540245056
+    ],
+    "synth_mean": [
+      -0.7355558276176453,
+      1.4985724687576294,
+      -0.40806910395622253,
+      0.3532339334487915
+    ],
+    "real_std": [
+      0.5917121171951294,
+      1.273375391960144,
+      0.4884868562221527,
+      0.8217827677726746
+    ],
+    "synth_std": [
+      1.1042674779891968,
+      1.4126030206680298,
+      1.6931012868881226,
+      1.7321703433990479
+    ]
+  },
+  "distribution": {
+    "avg_ks_statistic": 0.4004424778761062,
+    "avg_ks_pvalue": 1.4062673251863393e-10,
+    "avg_wasserstein_distance": 0.9719547351627288,
+    "ks_statistics": [
+      0.3893805309734513,
+      0.49557522123893805,
+      0.40707964601769914,
+      0.30973451327433627
+    ],
+    "ks_pvalues": [
+      1.1336210628009525e-15,
+      1.439262940539264e-25,
+      3.921536109657984e-17,
+      5.625057572381116e-10
+    ]
+  },
+  "physics_constraints": {
+    "real": {
+      "wcr_validity": 0.9911504424778761,
+      "fluence_nonnegative": 1.0,
+      "dose_strength_correlation": 0.6242348562550553
+    },
+    "synthetic": {
+      "wcr_validity": 0.6150442477876106,
+      "fluence_nonnegative": 1.0,
+      "dose_strength_correlation": 0.5732541194360112
+    }
+  },
+  "visualization_files": {
+    "distribution_comparison": "results/figures/feature_distribution_comparison.png",
+    "scatter_comparison": "results/figures/scatter_comparison.png",
+    "statistical_comparison": "results/figures/statistical_comparison.png"
+  },
+  "scores": {
+    "data_quality": 0.5579811162197673,
+    "physics_consistency": 0.8075221238938053,
+    "overall": 0.6577975192893826
+  }
+}
