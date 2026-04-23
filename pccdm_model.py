@@ -636,7 +636,7 @@ class ComparativeEvaluator:
         X_noisy = X_base + np.random.normal(0, 0.005, X_base.shape).astype(np.float32)
         
         return X_noisy, Y_synth
-    
+
     def single_experiment(self, random_seed=42):
         np.random.seed(random_seed)
         torch.manual_seed(random_seed)
@@ -730,7 +730,7 @@ class ComparativeEvaluator:
                 # -----------------------------------------------------------
                 # 第二步：计算假数据的统计学与物理指标
                 # -----------------------------------------------------------
-                if method_info['type'] != 'baseline':
+                if method_info['type'] != 'baseline' and X_train_synth is not None:
                     stat_evaluator = StatisticalFidelityEvaluator(X_train, X_train_synth, y_train, y_train_synth)
                     wd_score = stat_evaluator.compute_wasserstein_distance()
                     _ = stat_evaluator.compute_correlation_l2_distance() 
@@ -841,7 +841,8 @@ class ComparativeEvaluator:
             wd = summary[method_name]['wd_mean']
             dcr = summary[method_name]['dcr_mean']
             
-            if "Baseline" in desc:
+            # 只有真正的 Baseline (No Aug) 才不显示物理指标
+            if method_name == 'baseline':
                 phys_str, wd_str, dcr_str = "-", "-", "-"
             else:
                 phys_str = f"{phys:.6f}"
@@ -865,7 +866,8 @@ class ComparativeEvaluator:
                 plot_idx = range(len(descriptions))
                 labels = descriptions
             else:
-                plot_idx = [i for i, desc in enumerate(descriptions) if "Baseline" not in desc]
+                # 只排除真正的 baseline (method_name == 'baseline')
+                plot_idx = [i for i, m in enumerate(methods) if m != 'baseline']
                 labels = [descriptions[i] for i in plot_idx]
                 
             vals = [summary[methods[i]][data_key] for i in plot_idx]
@@ -892,7 +894,8 @@ class ComparativeEvaluator:
         create_bar_chart(ax2, 'rmse_mean', 'Prediction Error (RMSE) ↓', 'RMSE', True)
         
         ax3 = plt.subplot(2, 3, 3)
-        plot_indices = [i for i, desc in enumerate(descriptions) if "Baseline" not in desc]
+        # 帕累托前沿图：排除真正的 baseline
+        plot_indices = [i for i, m in enumerate(methods) if m != 'baseline']
         for i in plot_indices:
             phys_val = summary[methods[i]]['physics_res_mean']
             r2_val = summary[methods[i]]['r2_best']
