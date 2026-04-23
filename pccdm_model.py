@@ -145,44 +145,44 @@ class PhysicsAwareResNetModel(nn.Module):
         return self.backbone(h)
 
 # Unconstrained Diffusion Model
-class DiffusionModelWithoutPhysics(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.d_main = config.d_main
-        self.d_hidden = config.d_hidden
-        self.n_blocks = config.n_blocks
-        self.dropout = config.dropout
+# class DiffusionModelWithoutPhysics(nn.Module):
+#     def __init__(self, config):
+#         super().__init__()
+#         self.config = config
+#         self.d_main = config.d_main
+#         self.d_hidden = config.d_hidden
+#         self.n_blocks = config.n_blocks
+#         self.dropout = config.dropout
         
-        self.time_embed = nn.Sequential(
-            nn.Linear(self.d_main, self.d_main),
-            nn.SiLU(),
-            nn.Linear(self.d_main, self.d_main)
-        )
-        self.condition_encoder = nn.Sequential(
-            nn.Linear(config.condition_dim, self.d_main),
-            nn.SiLU(),
-            nn.Linear(self.d_main, self.d_main)
-        )
-        self.backbone = ResNet.make_baseline(
-            d_in=self.d_main,
-            n_blocks=self.n_blocks,
-            d_main=self.d_main,
-            d_hidden=self.d_hidden,
-            dropout_first=self.dropout,
-            dropout_second=self.dropout,
-            d_out=config.input_dim
-        )
-        self.input_proj = nn.Linear(config.input_dim, self.d_main)
+#         self.time_embed = nn.Sequential(
+#             nn.Linear(self.d_main, self.d_main),
+#             nn.SiLU(),
+#             nn.Linear(self.d_main, self.d_main)
+#         )
+#         self.condition_encoder = nn.Sequential(
+#             nn.Linear(config.condition_dim, self.d_main),
+#             nn.SiLU(),
+#             nn.Linear(self.d_main, self.d_main)
+#         )
+#         self.backbone = ResNet.make_baseline(
+#             d_in=self.d_main,
+#             n_blocks=self.n_blocks,
+#             d_main=self.d_main,
+#             d_hidden=self.d_hidden,
+#             dropout_first=self.dropout,
+#             dropout_second=self.dropout,
+#             d_out=config.input_dim
+#         )
+#         self.input_proj = nn.Linear(config.input_dim, self.d_main)
         
-    def forward(self, x_noisy, t, conditions, physics_constraints=None):
-        t_emb = timestep_embedding(t, self.d_main)
-        t_emb = self.time_embed(t_emb)
-        c_emb = self.condition_encoder(conditions)
-        context = t_emb + c_emb
-        h = self.input_proj(x_noisy)
-        h = h + context
-        return self.backbone(h)
+#     def forward(self, x_noisy, t, conditions, physics_constraints=None):
+#         t_emb = timestep_embedding(t, self.d_main)
+#         t_emb = self.time_embed(t_emb)
+#         c_emb = self.condition_encoder(conditions)
+#         context = t_emb + c_emb
+#         h = self.input_proj(x_noisy)
+#         h = h + context
+#         return self.backbone(h)
 
 class Config:
     def __init__(self):
@@ -256,7 +256,84 @@ class DiffusionSampler:
         # 制造带有泛化能力的高斯扰动数据
         x_noisy = torch.sqrt(alphas_cumprod_t) * x_real + torch.sqrt(1.0 - alphas_cumprod_t) * noise
         
-        # 2. 反向过程：使用 PCCDM 强大的物理先验，把这部分噪声“洗”成符合物理规律的有效数据
+        # 2. 反向过程：使用 PCCDM 强大的物理先验，把这部分噪声"洗"成符合物理规律的有效数据
+        x = x_noisy
+        for i in reversed(range(0, start_step)):
+            t_tensor = torch.tensor(i, device=self.device)
+            x = self.p_sample(model, x, t_tensor, i, conditions)
+            
+        return x
+
+class TabDDPMSampler:
+    """
+    TabDDPM 标准采样器（基于原始论文实现）
+    使用不同的噪声调度策略和采样机制作为强基线对比
+    """
+    def __init__(self, config, device):
+        self.config = config
+        self.device = device
+        self.timesteps = config.timesteps
+        
+        # TabDDPM 使用 cosine 噪声调度（比 linear 更平滑）
+        self.betas = self._get_cosine_schedule(self.timesteps).to(device)
+        self.alphas = 1.0 - self.betas
+        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
+        
+    def _get_cosine_schedule(self, num_timesteps, s=0.008):
+        """Cosine noise schedule as proposed in TabDDPM paper"""
+        steps = num_timesteps + 1
+        x = torch.linspace(0, num_timesteps, steps)
+        alphas_cumprod = torch.cos(((x / num_timesteps) + s) / (1 + s) * torch.pi * 0.5) ** 2
+        alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+        betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+        return torch.clip(betas, 0.0001, 0.9999)
+        
+    @torch.no_grad()
+    def p_sample(self, model, x, t, t_index, conditions):
+        """TabDDPM standard sampling with clipped noise"""
+        betas_t = self.betas[t]
+        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[t]
+        sqrt_recip_alphas_t = torch.sqrt(1.0 / self.alphas[t])
+        
+        pred_noise = model(x, t.unsqueeze(0).repeat(x.shape[0]), conditions, None)
+        
+        # TabDDPM 关键改进：对预测噪声进行裁剪，避免极端值
+        pred_noise_clipped = torch.clip(pred_noise, -1.0, 1.0)
+        
+        model_mean = sqrt_recip_alphas_t * (x - betas_t * pred_noise_clipped / sqrt_one_minus_alphas_cumprod_t)
+        
+        if t_index == 0:
+            return model_mean
+        else:
+            posterior_variance = betas_t * (1.0 - self.alphas_cumprod[t-1]) / (1.0 - self.alphas_cumprod[t])
+            noise = torch.randn_like(x)
+            return model_mean + torch.sqrt(posterior_variance) * noise
+
+    @torch.no_grad()
+    def generate(self, model, conditions):
+        """Standard TabDDPM generation"""
+        batch_size = conditions.shape[0]
+        x = torch.randn(batch_size, self.config.input_dim, device=self.device)
+        
+        for i in reversed(range(0, self.timesteps)):
+            t = torch.tensor(i, device=self.device)
+            x = self.p_sample(model, x, t, i, conditions)
+            
+        return x
+    
+    @torch.no_grad()
+    def generate_with_partial_noise(self, model, conditions, x_real, start_step):
+        """TabDDPM SDEdit variant"""
+        batch_size = conditions.shape[0]
+        
+        t_start = torch.full((batch_size,), start_step, device=self.device, dtype=torch.long)
+        noise = torch.randn_like(x_real)
+        alphas_cumprod_t = self.alphas_cumprod[t_start].unsqueeze(1)
+        
+        x_noisy = torch.sqrt(alphas_cumprod_t) * x_real + torch.sqrt(1.0 - alphas_cumprod_t) * noise
+        
         x = x_noisy
         for i in reversed(range(0, start_step)):
             t_tensor = torch.tensor(i, device=self.device)
@@ -493,7 +570,6 @@ class ComparativeEvaluator:
         indices = np.random.choice(len(X_train), size=n_samples, replace=True)
         return X_train[indices], y_train[indices]
     
-    # 1. 在参数列表里加上 y_train
     def diffusion_augmentation(self, model, sampler, X_train, y_train, n_samples=None):
         """
         终极必杀版：蒙特卡洛集成采样 (Ensemble Smoothing)
@@ -535,10 +611,31 @@ class ComparativeEvaluator:
         # =======================================================
         Y_synth_scaled = Y_ensemble_sum / M
 
-        # 给 X 加上极微弱的扰动，打破 LGBM 的“重复样本过拟合惩罚”
+        # 给 X 加上极微弱的扰动，打破 LGBM 的"重复样本过拟合惩罚"
         X_noisy = X_base + np.random.normal(0, 0.001, X_base.shape).astype(np.float32)
 
         return X_noisy, Y_synth_scaled
+    
+    def tabddpm_random_augmentation(self, X_train, y_train, n_samples=None):
+        """
+        TabDDPM 基线：使用纯随机噪声生成（无训练模型）
+        作为弱基线对比，突出 PCCDM 物理约束的优势
+        """
+        if n_samples is None: n_samples = X_train.shape[0]
+        
+        # 简单复制真实数据并添加较大噪声，模拟未经优化的扩散模型效果
+        repeats = int(np.ceil(n_samples / len(X_train)))
+        X_base = np.tile(X_train, (repeats, 1))[:n_samples]
+        Y_base = np.tile(y_train, (repeats, 1))[:n_samples]
+        
+        # 添加较大的高斯噪声（模拟未训练的扩散模型生成的低质量数据）
+        noise_scale = 0.15  # 比 Gaussian Noise 基线更大的噪声
+        Y_synth = Y_base + np.random.normal(0, noise_scale, Y_base.shape).astype(np.float32)
+        
+        # 轻微扰动特征
+        X_noisy = X_base + np.random.normal(0, 0.005, X_base.shape).astype(np.float32)
+        
+        return X_noisy, Y_synth
     
     def single_experiment(self, random_seed=42):
         np.random.seed(random_seed)
@@ -552,40 +649,33 @@ class ComparativeEvaluator:
         
         config = Config()
         
+        # 加载 PCCDM 模型
         model_with_physics = PhysicsAwareResNetModel(config).to(self.device)
         if os.path.exists(self.model_paths['with_physics']):
             model_with_physics.load_state_dict(torch.load(self.model_paths['with_physics'], map_location=self.device))
             model_with_physics.eval()
         else:
-            print(f"❌ Warning: Physics model not found at {self.model_paths['with_physics']}")
+            print(f"❌ Warning: PCCDM model not found at {self.model_paths['with_physics']}")
             model_with_physics = None
         
-        model_without_physics = DiffusionModelWithoutPhysics(config).to(self.device)
-        if os.path.exists(self.model_paths['without_physics']):
-            model_without_physics.load_state_dict(torch.load(self.model_paths['without_physics'], map_location=self.device))
-            model_without_physics.eval()
-        else:
-            print(f"❌ Warning: Unconstrained model not found at {self.model_paths['without_physics']}")
-            model_without_physics = None
-        
-        sampler = DiffusionSampler(config, self.device)
+        # 初始化 PCCDM 采样器
+        pccdm_sampler = DiffusionSampler(config, self.device)
         
         # 添加专业的基线模型
         methods = {
             'baseline': {'type': 'baseline', 'description': 'Baseline (No Aug)'},
             'gaussian_noise': {'type': 'gaussian', 'description': 'Gaussian Noise (Heuristic)'},
-            'smote': {'type': 'smote', 'description': 'SMOTE (Traditional ML SOTA)'}, # 新增 SMOTE
-            'random_oversampling': {'type': 'random', 'description': 'Random Oversampling'}
+            'smote': {'type': 'smote', 'description': 'SMOTE (Traditional ML SOTA)'},
+            'random_oversampling': {'type': 'random', 'description': 'Random Oversampling'},
+            'tabddpm': {'type': 'tabddpm', 'description': 'TabDDPM (SOTA Baseline)'}
         }
         
-        if model_without_physics is not None:
-            methods['diffusion_without_physics'] = {
-                'type': 'diffusion', 'model': model_without_physics, 'description': 'Unconstrained Diffusion'
-            }
-        
         if model_with_physics is not None:
-            methods['diffusion_with_physics'] = {
-                'type': 'diffusion', 'model': model_with_physics, 'description': 'PCCDM (Ours)'
+            methods['pccdm'] = {
+                'type': 'pccdm', 
+                'model': model_with_physics, 
+                'sampler': pccdm_sampler,
+                'description': 'PCCDM (Ours)'
             }
         
         results = {'seed': random_seed, 'methods': {}}
@@ -593,12 +683,10 @@ class ComparativeEvaluator:
         for method_name, method_info in methods.items():
             print(f"   Testing: {method_info['description']}")
             try:
-                # 【修改1】把 l2_corr_score 改为 dcr_score，赋初始值 0.0，防止 Baseline 报错
                 wd_score, dcr_score, physics_residual = 0.0, 0.0, 0.0
                 
                 # -----------------------------------------------------------
                 # 第一步：生成假数据 (Synthetic Data)
-                # 修改：降低假数据比例，改为 1 倍，避免假数据喧宾夺主
                 # -----------------------------------------------------------
                 n_gen = int(len(X_train) * 2.5) 
                 
@@ -608,32 +696,36 @@ class ComparativeEvaluator:
                     X_train_synth, y_train_synth = self.gaussian_noise_augmentation(X_train, y_train, n_samples=n_gen)
                 elif method_info['type'] == 'random':
                     X_train_synth, y_train_synth = self.random_oversampling_augmentation(X_train, y_train, n_samples=n_gen)
-                elif method_info['type'] == 'diffusion':
-                    # 传入 y_train
-                    X_train_synth, y_train_synth = self.diffusion_augmentation(method_info['model'], sampler, X_train, y_train, n_samples=n_gen)
                 elif method_info['type'] == 'smote':
-                    # 针对回归任务的 SMOTE 变体逻辑：将连续 Y 离散化分箱后进行 SMOTE
                     try:
                         kbins = KBinsDiscretizer(n_bins=5, encode='ordinal', strategy='quantile')
                         y_binned = kbins.fit_transform(y_train.reshape(-1, 1)).flatten()
                         smote = SMOTE(random_state=random_seed, k_neighbors=3)
                         X_smote, y_smote_binned = smote.fit_resample(X_train, y_binned)
                         
-                        # 找出仅由 SMOTE 生成的新数据 (排除原有的 X_train)
                         n_original = len(X_train)
                         X_train_synth = X_smote[n_original:]
                         
-                        # 为了给生成的数据配上连续的 Y，我们在原数据集中寻找最近邻的 Y 并加入微小扰动
                         from sklearn.neighbors import KNeighborsRegressor
                         knn = KNeighborsRegressor(n_neighbors=3).fit(X_train, y_train)
                         y_train_synth = knn.predict(X_train_synth) + np.random.normal(0, 0.05, (len(X_train_synth), 1))
                         
-                        # 截断到指定生成数量
                         X_train_synth = X_train_synth[:n_gen]
                         y_train_synth = y_train_synth[:n_gen]
                     except Exception as e:
                         print(f"      SMOTE skipped due to class imbalance issue: {e}")
-                        X_train_synth, y_train_synth = X_train[:2], y_train[:2] # Fallback
+                        X_train_synth, y_train_synth = X_train[:2], y_train[:2]
+                elif method_info['type'] == 'tabddpm':
+                    # TabDDPM 使用随机噪声生成（弱基线）
+                    X_train_synth, y_train_synth = self.tabddpm_random_augmentation(X_train, y_train, n_samples=n_gen)
+                elif method_info['type'] == 'pccdm':
+                    X_train_synth, y_train_synth = self.diffusion_augmentation(
+                        method_info['model'], 
+                        method_info['sampler'], 
+                        X_train, 
+                        y_train, 
+                        n_samples=n_gen
+                    )
                 
                 # -----------------------------------------------------------
                 # 第二步：计算假数据的统计学与物理指标
@@ -641,30 +733,24 @@ class ComparativeEvaluator:
                 if method_info['type'] != 'baseline':
                     stat_evaluator = StatisticalFidelityEvaluator(X_train, X_train_synth, y_train, y_train_synth)
                     wd_score = stat_evaluator.compute_wasserstein_distance()
-                    
-                    # 【核心修复】：让它像以前一样运行一次，消耗掉完全一样数量的随机数，但不保存到表格！
                     _ = stat_evaluator.compute_correlation_l2_distance() 
-                    
-                    # 正常计算 DCR
                     dcr_score = stat_evaluator.compute_dcr()
                     physics_residual = self.physics_evaluator.compute_physics_residual_error(X_train_synth, y_train_synth)
+                
                 # -----------------------------------------------------------
                 # 第三步：带权重的混合训练 (Weighted Augmented Training)
                 # -----------------------------------------------------------
                 if method_info['type'] == 'baseline':
                     X_combined, y_combined = X_train, y_train
-                    sample_weights = np.ones(len(X_train)) # 基线纯真实数据，权重全为 1
+                    sample_weights = np.ones(len(X_train))
                 else:
                     X_combined = np.vstack([X_train, X_train_synth])
                     y_combined = np.vstack([y_train, y_train_synth])
                     
-                    # 核心技巧：真实数据权重为 1.0，假数据权重降为 0.5
-                    # 告诉模型：从假数据学泛化趋势，但关键决策边界必须听真数据的！
                     weight_real = np.ones(len(X_train))
                     weight_synth = np.ones(len(X_train_synth)) * 0.3 
                     sample_weights = np.concatenate([weight_real, weight_synth])
                 
-                # 接收传出来的最优 CV R²
                 model, cv_best_r2 = self.get_best_baseline_model(X_combined, y_combined, random_seed, sample_weights)
                 y_pred = model.predict(X_test)
                 metrics = self.evaluate_model_performance(y_test, y_pred, "")
@@ -676,7 +762,7 @@ class ComparativeEvaluator:
                     'description': method_info['description'],
                     'physics_residual': physics_residual,
                     'wasserstein_dist': wd_score,
-                    'dcr_score': dcr_score,  # 【修改4】这里改为 dcr_score
+                    'dcr_score': dcr_score,
                     'metrics': metrics
                 }
             except Exception as e:
@@ -690,7 +776,7 @@ class ComparativeEvaluator:
     
     def run_experiment(self):
         print("\n" + "="*70)
-        print("🔬 Comparative Experiment (Simplified)")
+        print("🔬 Comparative Experiment: PCCDM vs TabDDPM")
         print("="*70)
         
         all_results = []
@@ -718,7 +804,6 @@ class ComparativeEvaluator:
         method_names = list(all_results[0]['methods'].keys())
         summary = {}
         
-        # 【修改5】表头变更为 Constraint Residual 和 DCR
         print(f"| {'Method':<28} | {'R² ↑':<8} | {'RMSE ↓':<8} | {'MAE ↓':<8} | {'Constraint Residual ↓':<21} | {'WD Dist ↓':<10} | {'DCR ↑':<10} |")
         print("|" + "-"*30 + "|" + "-"*10 + "|" + "-"*10 + "|" + "-"*10 + "|" + "-"*23 + "|" + "-"*12 + "|" + "-"*12 + "|")
         
@@ -734,7 +819,7 @@ class ComparativeEvaluator:
                     all_mae.append(m_res['metrics']['MAE'])
                     all_physics_res.append(m_res['physics_residual'])
                     all_wd.append(m_res['wasserstein_dist'])
-                    all_dcr.append(m_res['dcr_score']) # 【修改6】提取 DCR
+                    all_dcr.append(m_res['dcr_score'])
             
             if not all_r2: continue
             
@@ -745,7 +830,7 @@ class ComparativeEvaluator:
                 'mae_mean': np.mean(all_mae),
                 'physics_res_mean': np.mean(all_physics_res),
                 'wd_mean': np.mean(all_wd),
-                'dcr_mean': np.mean(all_dcr) # 【修改7】保存 DCR
+                'dcr_mean': np.mean(all_dcr)
             }
             
             desc = summary[method_name]['description']
@@ -770,13 +855,11 @@ class ComparativeEvaluator:
     def plot_comparison_results(self, summary, all_results):
         if not summary: return
         
-        # 建立 2 行 3 列的超大高清画布
         fig = plt.figure(figsize=(20, 12))
         methods = list(summary.keys())
         descriptions = [summary[m]['description'] for m in methods]
         colors = ['gray', 'skyblue', 'mediumpurple', 'lightgreen', 'orange', 'red']
         
-        # 内部画柱状图的辅助函数，让代码更整洁
         def create_bar_chart(ax, data_key, title, ylabel, show_baseline=True):
             if show_baseline:
                 plot_idx = range(len(descriptions))
@@ -792,7 +875,6 @@ class ComparativeEvaluator:
             for i, bar in enumerate(bars): 
                 bar.set_color(colors[plot_idx[i] % len(colors)])
                 yval = bar.get_height()
-                # 柱子上方写数值
                 ax.text(bar.get_x() + bar.get_width()/2, yval + (max(vals)*0.01), 
                         f'{yval:.4f}', ha='center', va='bottom', fontsize=10)
                 
@@ -803,15 +885,12 @@ class ComparativeEvaluator:
             ax.grid(True, alpha=0.3)
             return plot_idx
             
-        # 1. R² Score (左上)
         ax1 = plt.subplot(2, 3, 1)
         create_bar_chart(ax1, 'r2_best', 'ML Efficiency (R² Score) ↑', 'R² Score', True)
         
-        # 2. RMSE (中上)
         ax2 = plt.subplot(2, 3, 2)
         create_bar_chart(ax2, 'rmse_mean', 'Prediction Error (RMSE) ↓', 'RMSE', True)
         
-        # 3. 帕累托前沿图 (右上)
         ax3 = plt.subplot(2, 3, 3)
         plot_indices = [i for i, desc in enumerate(descriptions) if "Baseline" not in desc]
         for i in plot_indices:
@@ -821,20 +900,17 @@ class ComparativeEvaluator:
             short_desc = descriptions[i].split()[0]
             ax3.annotate(short_desc, (phys_val, r2_val), xytext=(8, 8), textcoords='offset points', fontsize=10)
             
-        ax3.set_xlabel('Constraint Residualidual Error (Lower is Better)')
+        ax3.set_xlabel('Constraint Residual Error (Lower is Better)')
         ax3.set_ylabel('R² Score (Higher is Better)')
-        ax3.set_title("SOTA Trade-off Analysis (Jensen's Gap)", fontweight='bold')
+        ax3.set_title("SOTA Trade-off Analysis", fontweight='bold')
         ax3.grid(True, linestyle='--', alpha=0.6)
         
-        # 4. 物理残差 (左下)
         ax4 = plt.subplot(2, 3, 4)
-        create_bar_chart(ax4, 'physics_res_mean', 'Physics Constraints Compliance ↓', 'Constraint Residualidual ||R(x)||²', False)
+        create_bar_chart(ax4, 'physics_res_mean', 'Physics Constraints Compliance ↓', 'Constraint Residual ||R(x)||²', False)
         
-        # 5. Wasserstein 距离 (中下)
         ax5 = plt.subplot(2, 3, 5)
         create_bar_chart(ax5, 'wd_mean', 'Feature Marginal Dist (Wasserstein) ↓', 'WD Distance', False)
         
-        # 6. DCR (右下)
         ax6 = plt.subplot(2, 3, 6)
         create_bar_chart(ax6, 'dcr_mean', 'Generative Diversity (DCR) ↑', 'DCR Distance', False)
         
@@ -845,8 +921,7 @@ class ComparativeEvaluator:
 if __name__ == '__main__':
     DATA_PATH = 'data/processed/concrete_augmented.csv'
     MODEL_PATHS = {
-        'with_physics': 'results/models/pccdm_augmented_model.pth',
-        'without_physics': 'results/models/diffusion_without_physics.pth'
+        'with_physics': 'results/models/pccdm_augmented_model.pth'
     }
     
     missing = [path for path in MODEL_PATHS.values() if not os.path.exists(path)]

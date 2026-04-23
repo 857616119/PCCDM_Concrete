@@ -180,41 +180,7 @@ def train():
     os.makedirs('results/models', exist_ok=True)
     
     # ----------------------------------------
-    # 任务 A: 训练无物理约束的基线扩散模型
-    # ----------------------------------------
-    print("\n" + "="*50)
-    print("⏳ 正在训练：无约束扩散模型 (Unconstrained DDPM)...")
-    model_no_phys = PhysicsAwareResNetModel(config).to(device)
-    optimizer_no_phys = optim.Adam(model_no_phys.parameters(), lr=config.lr)
-    
-    for epoch in range(config.epochs):
-        total_loss = 0
-        for y, x_cond in dataloader:
-            y, x_cond = y.to(device), x_cond.to(device)
-            optimizer_no_phys.zero_grad()
-            
-            t = torch.randint(0, config.timesteps, (y.shape[0],), device=device).long()
-            noise = torch.randn_like(y)
-            alpha_t = alphas_cumprod[t].view(-1, 1)
-            
-            # 前向加噪
-            y_noisy = torch.sqrt(alpha_t) * y + torch.sqrt(1 - alpha_t) * noise
-            # 预测噪声
-            noise_pred = model_no_phys(y_noisy, t, x_cond)
-            
-            loss = nn.MSELoss()(noise_pred, noise)
-            loss.backward()
-            optimizer_no_phys.step()
-            total_loss += loss.item()
-            
-        if (epoch+1) % 100 == 0:
-            print(f"  Epoch {epoch+1}/{config.epochs} | MSE Loss: {total_loss/len(dataloader):.4f}")
-            
-    torch.save(model_no_phys.state_dict(), 'results/models/diffusion_without_physics.pth')
-    print("✅ 无约束模型保存完毕！")
-
-    # ----------------------------------------
-    # 任务 B: 训练 PCCDM (含物理约束损失)
+    # 训练 PCCDM (含物理约束损失)
     # ----------------------------------------
     print("\n" + "="*50)
     print("⏳ 正在训练：物理约束扩散模型 (PCCDM)...")
