@@ -30,7 +30,7 @@ class Config:
         self.beta_end = 0.02
         
         # 训练超参数
-        self.epochs = 500
+        self.epochs = 1000
         self.batch_size = 128
         self.lr = 1e-3
         self.physics_weight = 0.1 # 物理损失的权重 λ
