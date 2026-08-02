@@ -439,6 +439,44 @@ class PhysicsResidualEvaluator:
         # 将平均改为求和，放大不同模型之间的物理代沟
         return np.sum(residuals)
 
+    def compute_physics_violation_rate(self, X_scaled, y_scaled):
+        """
+        新增：计算生成样本中具体违反物理约束的比例 (%)
+        """
+        X = self.inverse_transform_x(X_scaled)
+        y = self.inverse_transform_y(y_scaled)
+        N = len(y)
+        
+        # 1. 边界违规数 (超出 [0.1, 2.0] 的样本数)
+        bound_violations = np.sum((y < 0.1) | (y > 2.0))
+        
+        # 2. 水灰比单调性违规数
+        wc_ratio = X[:, 2]
+        strength = y.flatten()
+        sort_idx = np.argsort(wc_ratio)
+        sorted_wc = wc_ratio[sort_idx]
+        sorted_str = strength[sort_idx]
+        window = max(1, len(wc_ratio) // 10)
+        dw = sorted_wc[window:] - sorted_wc[:-window]
+        ds = sorted_str[window:] - sorted_str[:-window]
+        # 记录反常现象：水灰比增加，强度却反常上升
+        wc_violations = np.sum((dw > 0.05) & (ds > 0))
+        
+        # 3. 注量衰减单调性违规数
+        fluence = X[:, 0]
+        sort_idx_f = np.argsort(fluence)
+        sorted_f = fluence[sort_idx_f]
+        sorted_str_f = strength[sort_idx_f]
+        df = sorted_f[window:] - sorted_f[:-window]
+        ds_f = sorted_str_f[window:] - sorted_str_f[:-window]
+        # 记录反常现象：注量增加，强度却反常上升
+        f_violations = np.sum((df > 0.5) & (ds_f > 0))
+        
+        # 综合违规率计算：总违规数 / 总检查对数
+        total_checks = N + 2 * (N - window)
+        total_violations = bound_violations + wc_violations + f_violations
+        
+        return (total_violations / total_checks) * 100.0  # 返回百分比
 
 # 4. Evaluator (Translated)
 
@@ -744,7 +782,7 @@ class ComparativeEvaluator:
         for method_name, method_info in methods.items():
             print(f"   Testing: {method_info['description']}")
             try:
-                wd_score, dcr_score, physics_residual = 0.0, 0.0, 0.0
+                wd_score, dcr_score, physics_residual, physics_violation = 0.0, 0.0, 0.0, 0.0
                 
                 # -----------------------------------------------------------
                 # 第一步：生成假数据 (Synthetic Data)
@@ -811,6 +849,7 @@ class ComparativeEvaluator:
                     _ = stat_evaluator.compute_correlation_l2_distance() 
                     dcr_score = stat_evaluator.compute_dcr()
                     physics_residual = self.physics_evaluator.compute_physics_residual_error(X_train_synth, y_train_synth)
+                    physics_violation = self.physics_evaluator.compute_physics_violation_rate(X_train_synth, y_train_synth)
                 
                 # -----------------------------------------------------------
                 # 第三步：带权重的混合训练 (Weighted Augmented Training)
@@ -836,6 +875,7 @@ class ComparativeEvaluator:
                 results['methods'][method_name] = {
                     'description': method_info['description'],
                     'physics_residual': physics_residual,
+                    'physics_violation': physics_violation, 
                     'wasserstein_dist': wd_score,
                     'dcr_score': dcr_score,
                     'metrics': metrics
@@ -872,20 +912,20 @@ class ComparativeEvaluator:
         return summary
     
     def summarize_results(self, all_results):
-        print("\n" + "="*120)
+        print("\n" + "="*145)
         print("📊 综合性能评测表 (带标准差 Mean ± SD，可直接填入论文 Table 中)")
-        print("="*120)
+        print("="*145)
         
         method_names = list(all_results[0]['methods'].keys())
         summary = {}
         
-        # 加宽了表头，以容纳 "0.0000 ± 0.0000" 的长度
-        print(f"| {'Method':<28} | {'R² ↑':<17} | {'RMSE ↓':<17} | {'MAE ↓':<17} | {'Constraint Residual ↓':<21} | {'WD Dist ↓':<10} | {'DCR ↑':<10} |")
-        print("|" + "-"*30 + "|" + "-"*19 + "|" + "-"*19 + "|" + "-"*19 + "|" + "-"*23 + "|" + "-"*12 + "|" + "-"*12 + "|")
+        # 加宽表头，加入 Violation Rate(%) 列
+        print(f"| {'Method':<28} | {'R² ↑':<17} | {'RMSE ↓':<17} | {'MAE ↓':<17} | {'Constraint Residual ↓':<21} | {'Violation Rate(%) ↓':<19} | {'WD Dist ↓':<10} | {'DCR ↑':<10} |")
+        print("|" + "-"*30 + "|" + "-"*19 + "|" + "-"*19 + "|" + "-"*19 + "|" + "-"*23 + "|" + "-"*21 + "|" + "-"*12 + "|" + "-"*12 + "|")
         
         for method_name in method_names:
             all_r2, all_rmse, all_mae = [], [], []
-            all_physics_res, all_wd, all_dcr = [], [], []
+            all_physics_res, all_physics_viol, all_wd, all_dcr = [], [], [], []
             
             for result in all_results:
                 if method_name in result['methods']:
@@ -894,47 +934,43 @@ class ComparativeEvaluator:
                     all_rmse.append(m_res['metrics']['RMSE'])
                     all_mae.append(m_res['metrics']['MAE'])
                     all_physics_res.append(m_res['physics_residual'])
+                    all_physics_viol.append(m_res.get('physics_violation', 0.0)) # 新增
                     all_wd.append(m_res['wasserstein_dist'])
                     all_dcr.append(m_res['dcr_score'])
             
             if not all_r2: continue
             
-            # 计算均值 (mean) 和 标准差 (std)
             summary[method_name] = {
                 'description': all_results[0]['methods'][method_name]['description'],
-                'r2_mean': np.mean(all_r2),
-                'r2_std': np.std(all_r2),
-                'rmse_mean': np.mean(all_rmse),
-                'rmse_std': np.std(all_rmse),
-                'mae_mean': np.mean(all_mae),
-                'mae_std': np.std(all_mae),
-                'physics_res_mean': np.mean(all_physics_res),
-                'physics_res_std': np.std(all_physics_res), # 物理残差也记录标准差
-                'wd_mean': np.mean(all_wd),
-                'dcr_mean': np.mean(all_dcr)
+                'r2_mean': np.mean(all_r2), 'r2_std': np.std(all_r2),
+                'rmse_mean': np.mean(all_rmse), 'rmse_std': np.std(all_rmse),
+                'mae_mean': np.mean(all_mae), 'mae_std': np.std(all_mae),
+                'physics_res_mean': np.mean(all_physics_res), 'physics_res_std': np.std(all_physics_res), 
+                'physics_viol_mean': np.mean(all_physics_viol), 'physics_viol_std': np.std(all_physics_viol), # 新增
+                'wd_mean': np.mean(all_wd), 'dcr_mean': np.mean(all_dcr)
             }
             
             desc = summary[method_name]['description']
-            
-            # 格式化为 Mean ± SD
             r2_str = f"{summary[method_name]['r2_mean']:.4f}±{summary[method_name]['r2_std']:.4f}"
             rmse_str = f"{summary[method_name]['rmse_mean']:.4f}±{summary[method_name]['rmse_std']:.4f}"
             mae_str = f"{summary[method_name]['mae_mean']:.4f}±{summary[method_name]['mae_std']:.4f}"
             
             phys_mean = summary[method_name]['physics_res_mean']
             phys_std = summary[method_name]['physics_res_std']
+            viol_mean = summary[method_name]['physics_viol_mean']
+            viol_std = summary[method_name]['physics_viol_std']
             wd = summary[method_name]['wd_mean']
             dcr = summary[method_name]['dcr_mean']
             
-            # 只有真正的 Baseline (No Aug) 才不显示物理指标
             if method_name == 'baseline':
-                phys_str, wd_str, dcr_str = "-", "-", "-"
+                phys_str, viol_str, wd_str, dcr_str = "-", "-", "-", "-"
             else:
                 phys_str = f"{phys_mean:.4f}±{phys_std:.4f}"
+                viol_str = f"{viol_mean:.2f}±{viol_std:.2f}%"  # 格式化为百分比
                 wd_str = f"{wd:.4f}"
                 dcr_str = f"{dcr:.4f}"
                 
-            print(f"| {desc:<28} | {r2_str:<17} | {rmse_str:<17} | {mae_str:<17} | {phys_str:<21} | {wd_str:<10} | {dcr_str:<10} |")
+            print(f"| {desc:<28} | {r2_str:<17} | {rmse_str:<17} | {mae_str:<17} | {phys_str:<21} | {viol_str:<19} | {wd_str:<10} | {dcr_str:<10} |")
         
         return summary
     
@@ -1137,6 +1173,124 @@ class ComparativeEvaluator:
         plt.close(fig4)
         print("✅ Saved: pccdm_pareto_frontier.png")
 
+    def run_engineering_application(self, random_seed=42):
+        print("\n" + "="*80)
+        print("☢️ Running Engineering Application: Reactor Life Prediction (40/60/80 Years)")
+        print("="*80)
+        
+        # 1. 快速训练一个基于 PCCDM 增广的 GBDT 模型
+        config = Config()
+        model_with_physics = PhysicsAwareResNetModel(config).to(self.device)
+        if not os.path.exists(self.model_paths['with_physics']):
+            print("❌ PCCDM Model not found. Please train it first.")
+            return
+            
+        model_with_physics.load_state_dict(torch.load(self.model_paths['with_physics'], map_location=self.device))
+        model_with_physics.eval()
+        pccdm_sampler = DiffusionSampler(config, self.device)
+        
+        print("   -> Generating synthetic physics data for robust extrapolation...")
+        n_gen = int(len(self.X_scaled) * 2.5)
+        X_train_synth, y_train_synth = self.diffusion_augmentation(model_with_physics, pccdm_sampler, self.X_scaled, self.Y_scaled, n_samples=n_gen)
+        
+        X_combined = np.vstack([self.X_scaled, X_train_synth])
+        y_combined = np.vstack([self.Y_scaled, y_train_synth])
+        weight_real = np.ones(len(self.X_scaled))
+        weight_synth = np.ones(len(X_train_synth)) * 0.02
+        sample_weights = np.concatenate([weight_real, weight_synth])
+        
+        print("   -> Training GBDT Inference Engine...")
+        model = LGBMRegressor(
+            n_estimators=300, learning_rate=0.05, max_depth=6, num_leaves=31, 
+            random_state=random_seed, verbose=-1, 
+            monotone_constraints=(-1, 0, 0, 0, 0)
+        )
+        model.fit(X_combined, y_combined.ravel(), sample_weight=sample_weights)
+        
+        # 2. 构建时间推理序列 (0 到 100 年)
+        years = np.linspace(0, 100, 100)
+        flux = 1.5e9 # 中子通量率 n/(cm2*s)
+        seconds_per_year = 365 * 24 * 3600
+        fluences = flux * years * seconds_per_year # 转换为累积注量
+        
+        # 构建基准工况矩阵 (Baseline Profile)
+        X_inference_raw = np.zeros((len(years), 5))
+        X_inference_raw[:, 0] = np.log1p(fluences) # 模型训练时注量做了 log1p 处理
+        X_inference_raw[:, 1] = 65.0              # 恒定温度 65 摄氏度
+        X_inference_raw[:, 2] = self.x_mean[2]    # 水灰比 (取数据集均值)
+        X_inference_raw[:, 3] = self.x_mean[3]    # 骨料水泥比 (取数据集均值)
+        X_inference_raw[:, 4] = self.x_mean[4]    # 混凝土类型 (取数据集众数/均值)
+        
+        # 标准化推理特征
+        X_inference_scaled = (X_inference_raw - self.x_mean) / (self.x_std + 1e-8)
+        
+        # 3. 执行预测并反归一化还原真实强度
+        y_pred_scaled = model.predict(X_inference_scaled)
+        y_pred_real = y_pred_scaled * self.y_std[0] + self.y_mean[0]
+        
+        # 提取关键时间节点的值 (40, 60, 80年)
+        val_40 = np.interp(40, years, y_pred_real)
+        val_60 = np.interp(60, years, y_pred_real)
+        val_80 = np.interp(80, years, y_pred_real)
+        margin_60 = (val_60 - 0.75) * 100 # 转换为百分比裕度
+        
+        print("\n📈 [LaTeX Fill-in Values]")
+        print(f"   - 40 Years Prediction: {val_40:.4f}")
+        print(f"   - 60 Years Prediction: {val_60:.4f}")
+        print(f"   - 60 Years Safety Margin: {margin_60:.2f}%")
+        print(f"   - 80 Years Prediction: {val_80:.4f}")
+        
+        # 4. 绘制顶刊级别的安全评估图 (Figure 7)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        TITLE_FONT = 18  # 标题字体最大，加粗
+        LABEL_FONT = 15  # X/Y轴标签字体居中
+        TICK_FONT = 13   # 刻度线、图例和标注字体最小
+        
+        # 绘制预测退化曲线
+        ax.plot(years, y_pred_real, color='#1f77b4', linewidth=3, label='Predicted Strength Retention')
+        
+        # 绘制 75% 安全阈值线及其危险阴影区
+        ax.axhline(y=0.75, color='red', linestyle='--', linewidth=2, label='Safety Threshold (75%)')
+        ax.fill_between(years, 0, 0.75, color='red', alpha=0.08)
+        
+        # 标注关键时间点
+        target_years = [40, 60, 80]
+        target_vals = [val_40, val_60, val_80]
+        colors = ['green', 'orange', 'purple']
+        labels = ['Design Life (40y)', '1st Extension (60y)', '2nd Extension (80y)']
+        
+        for y, val, c, l in zip(target_years, target_vals, colors, labels):
+            ax.scatter(y, val, s=150, color=c, zorder=5, edgecolors='black')
+            ax.vlines(x=y, ymin=0, ymax=val, color=c, linestyle=':', linewidth=2, alpha=0.7)
+            
+            # 添加数值文本框 (使用统一的 TICK_FONT)
+            ax.annotate(f'{val:.2f}', (y, val), xytext=(10, 10), textcoords='offset points',
+                        fontsize=TICK_FONT, fontweight='bold', color=c,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=c, alpha=0.9))
+            # X轴标记文本 (使用统一的 TICK_FONT)
+            ax.text(y, 0.05, l, rotation=90, color=c, fontweight='bold', fontsize=TICK_FONT, va='bottom', ha='right')
+
+        # 坐标轴与标题应用统一字体
+        ax.set_xlabel('Reactor Operating Time (EFPY)', fontsize=LABEL_FONT)
+        ax.set_ylabel('Relative Compressive Strength Retention', fontsize=LABEL_FONT)
+        ax.set_title('Long-Term Concrete Biological Shield Life Prediction', fontweight='bold', fontsize=TITLE_FONT)
+        
+        ax.set_xlim(0, 100)
+        ax.set_ylim(0, max(1.1, np.max(y_pred_real)*1.05))
+        ax.grid(True, linestyle='--', alpha=0.5)
+        
+        # 刻度及图例应用统一字体
+        ax.tick_params(axis='both', which='major', labelsize=TICK_FONT)
+        ax.legend(loc='upper right', fontsize=TICK_FONT)
+        
+        plt.tight_layout()
+        plt.savefig('pccdm_life_prediction.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        plt.close(fig)
+        print("✅ Saved: pccdm_life_prediction.png")
+
+
 if __name__ == '__main__':
     DATA_PATH = 'data/processed/concrete_augmented.csv'
     MODEL_PATHS = {
@@ -1156,3 +1310,5 @@ if __name__ == '__main__':
         
         if summary:
             print("\n Experiment Complete!")
+
+        evaluator.run_engineering_application()
