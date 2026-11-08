@@ -46,6 +46,7 @@ observations and from a baseline trained on an interpolated pool. Both are descr
 | `evaluate_derived.py` | ablation of the derived physics features |
 | `evaluate_memorization.py` | exact and near copy rates, nearest-neighbour distance ratio, coverage, KS statistic |
 | `evaluate_life.py` | Section 6 fluence integral, monotone prediction, bootstrap interval, threshold sweep |
+| `compare_fluence_domain.py` | measured retention by fluence interval, the temperature confound, and the within-formulation comparison (Section 6.3, Table 11) |
 | `check_sample_budget.py` | sample counts per fold and the out-of-band rate of the generated values (Section 4.7) |
 | `data/processed/concrete_processed.csv` | the 239 measured observations (analysis table) |
 | `data/processed/concrete_processed_with_physics_features.csv` | same rows with the derived indicators, used only by `evaluate_derived.py` |
@@ -97,7 +98,8 @@ are deterministic. Run from the repository root.
 | `N_REPEATS=10 python evaluate_physics.py` | Table 8 | 5.4 | 2 min |
 | `python evaluate_derived.py` | Table 6 | 5.6 | 1 min |
 | `N_REPEATS=10 python evaluate_memorization.py` | Table 9 | 5.7 | 10 min |
-| `python evaluate_life.py` | Tables 10–11, Figure 7 | 6 | 1 min |
+| `python evaluate_life.py` | Tables 10 and 12, Figure 7 | 6 | 1 min |
+| `python compare_fluence_domain.py` | Table 11, numbers in Section 6.3 | 6.3 | 1 min |
 | `python check_sample_budget.py` | numbers quoted in Section 4.7 | 4.7 | 2 min |
 
 Each script writes a JSON file to the working directory; the copies in `results/r1/` are the outputs
