@@ -98,14 +98,15 @@ are deterministic. Run from the repository root.
 | `python evaluate_derived.py` | Table 6 | 5.6 | 1 min |
 | `N_REPEATS=10 python evaluate_memorization.py` | Table 9 | 5.7 | 10 min |
 | `python evaluate_life.py` | Tables 10–11, Figure 7 | 6 | 1 min |
-| `python check_sample_budget.py` | numbers quoted in Section 4.7 | 4.7 | 3 min |
+| `python check_sample_budget.py` | numbers quoted in Section 4.7 | 4.7 | 2 min |
 
 Each script writes a JSON file to the working directory; the copies in `results/r1/` are the outputs
 behind the published numbers. `evaluate_ablation.py` writes a progress file after every repetition and can
 be interrupted and resumed.
 
-The ablation dominates the wall time. `evaluate_derived.py` was re-run after the release tree was
-assembled and reproduces `results/r1/derived_features.json` to the last digit.
+The ablation dominates the wall time. Two scripts were re-run from a clean checkout of the tagged version
+after the release tree was assembled, and both reproduce the archived JSON exactly: `evaluate_derived.py`
+(`derived_features.json`) and `check_sample_budget.py` (`sample_budget.json`).
 
 ---
 
