@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Experiment artefacts, all of which the released scripts regenerate
+_*.json
+_*.jsonl
+_*.log
+*.pth
+
+# Editors and OS
+.vscode/
+.DS_Store
+Thumbs.db

@@ -862,15 +862,18 @@ class ComparativeEvaluator:
                     y_combined = np.vstack([y_train, y_train_synth])
                     
                     weight_real = np.ones(len(X_train))
-                    weight_synth = np.ones(len(X_train_synth)) * 0.02
+                    weight_synth = np.ones(len(X_train_synth)) * getattr(self, 'synth_weight', 0.02)
                     sample_weights = np.concatenate([weight_real, weight_synth])
                 
                 model, cv_best_r2 = self.get_best_baseline_model(X_combined, y_combined, random_seed, sample_weights)
                 y_pred = model.predict(X_test)
                 metrics = self.evaluate_model_performance(y_test, y_pred, "")
                 
-                if method_info['type'] != 'random':
-                    metrics['R2'] = cv_best_r2
+                # --- R1 fix ---
+                # R2 must be evaluated on the same held-out test set as RMSE/MAE.
+                # It was previously overwritten by the training-fold CV score,
+                # so the three columns of Table 2 referred to different data.
+                metrics['R2_trainCV'] = cv_best_r2
                 
                 results['methods'][method_name] = {
                     'description': method_info['description'],
