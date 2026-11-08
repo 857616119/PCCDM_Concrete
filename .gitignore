@@ -14,3 +14,6 @@ _*.log
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Outputs of the superseded pipeline
+*.png
