@@ -37,20 +37,21 @@ observations and from a baseline trained on an interpolated pool. Both are descr
 
 | Path | Contents |
 | --- | --- |
-| `pccdm_model.py` | conditional residual denoiser, diffusion sampler, physics evaluator |
-| `train.py` | training loop, physics loss terms, dataset wrapper |
-| `augment.py` | data augmentation entry point |
-| `evaluate_P1.py` | downstream comparison of five augmentation strategies, grouped and random splits, 10 repetitions |
-| `evaluate_ablation.py` | component ablation and the three-predictor comparison |
-| `evaluate_physics.py` | constraint residual, violation rate, Wasserstein distance, measured-data reference |
-| `evaluate_derived.py` | ablation of the derived physics features |
-| `evaluate_memorization.py` | exact and near copy rates, nearest-neighbour distance ratio, coverage, KS statistic |
-| `evaluate_life.py` | Section 6 fluence integral, monotone prediction, bootstrap interval, threshold sweep |
-| `compare_fluence_domain.py` | measured retention by fluence interval, the temperature confound, and the within-formulation comparison (Section 6.3, Table 11) |
-| `check_sample_budget.py` | sample counts per fold and the out-of-band rate of the generated values (Section 4.7) |
+| `src/pccdm_model.py` | conditional residual denoiser, diffusion sampler, physics evaluator |
+| `archive/train.py` | training loop of the original submission, kept for provenance only |
+| `archive/augment.py` | augmentation entry point of the original submission, kept for provenance only |
+| `src/evaluate_P1.py` | downstream comparison of five augmentation strategies, grouped and random splits, 10 repetitions |
+| `src/evaluate_ablation.py` | component ablation and the three-predictor comparison |
+| `src/evaluate_physics.py` | constraint residual, violation rate, Wasserstein distance, measured-data reference |
+| `src/evaluate_derived.py` | ablation of the derived physics features |
+| `src/evaluate_memorization.py` | exact and near copy rates, nearest-neighbour distance ratio, coverage, KS statistic |
+| `src/evaluate_life.py` | Section 6 fluence integral, monotone prediction, bootstrap interval, threshold sweep |
+| `src/compare_fluence_domain.py` | measured retention by fluence interval, the temperature confound, and the within-formulation comparison (Section 6.3, Table 11) |
+| `src/check_sample_budget.py` | sample counts per fold and the out-of-band rate of the generated values (Section 4.7) |
 | `data/processed/concrete_processed.csv` | the 239 measured observations (analysis table) |
 | `data/processed/concrete_processed_with_physics_features.csv` | same rows with the derived indicators, used only by `evaluate_derived.py` |
 | `results/r1/*.json` | outputs of the runs reported in the manuscript |
+| `archive/` | superseded pipeline: original training loop, augmentation, and its result files |
 
 ---
 
@@ -92,23 +93,24 @@ are deterministic. Run from the repository root.
 
 | Command | Produces | Section | Runtime |
 | --- | --- | --- | --- |
-| `N_REPEATS=10 SPLIT=grouped python evaluate_P1.py` | Table 4, Figures 5–6 | 5.2 | 9 min |
-| `N_REPEATS=10 SPLIT=random python evaluate_P1.py` | random-split rows of Table 4 | 5.2 | 9 min |
-| `N_REPEATS=10 python evaluate_ablation.py` | Tables 5 and 7 | 5.6 | 78 min |
-| `N_REPEATS=10 python evaluate_physics.py` | Table 8 | 5.4 | 2 min |
-| `python evaluate_derived.py` | Table 6 | 5.6 | 1 min |
-| `N_REPEATS=10 python evaluate_memorization.py` | Table 9 | 5.7 | 10 min |
-| `python evaluate_life.py` | Tables 10 and 12, Figure 7 | 6 | 1 min |
-| `python compare_fluence_domain.py` | Table 11, numbers in Section 6.3 | 6.3 | 1 min |
-| `python check_sample_budget.py` | numbers quoted in Section 4.7 | 4.7 | 2 min |
+| `N_REPEATS=10 SPLIT=grouped python src/evaluate_P1.py` | Table 4, Figures 5–6 | 5.2 | 9 min |
+| `N_REPEATS=10 SPLIT=random python src/evaluate_P1.py` | random-split rows of Table 4 | 5.2 | 9 min |
+| `N_REPEATS=10 python src/evaluate_ablation.py` | Tables 5 and 7 | 5.6 | 78 min |
+| `N_REPEATS=10 python src/evaluate_physics.py` | Table 8 | 5.4 | 2 min |
+| `python src/evaluate_derived.py` | Table 6 | 5.6 | 1 min |
+| `N_REPEATS=10 python src/evaluate_memorization.py` | Table 9 | 5.7 | 10 min |
+| `python src/evaluate_life.py` | Tables 10 and 12, Figure 7 | 6 | 1 min |
+| `python src/compare_fluence_domain.py` | Table 11, numbers in Section 6.3 | 6.3 | 1 min |
+| `python src/check_sample_budget.py` | numbers quoted in Section 4.7 | 4.7 | 2 min |
 
 Each script writes a JSON file to the working directory; the copies in `results/r1/` are the outputs
 behind the published numbers. `evaluate_ablation.py` writes a progress file after every repetition and can
 be interrupted and resumed.
 
-The ablation dominates the wall time. Two scripts were re-run from a clean checkout of the tagged version
-after the release tree was assembled, and both reproduce the archived JSON exactly: `evaluate_derived.py`
-(`derived_features.json`) and `check_sample_budget.py` (`sample_budget.json`).
+The ablation dominates the wall time. The three scripts that do not require a long training run were
+re-run from a clean checkout of the tagged version after the release tree was assembled, and each
+reproduces the archived JSON exactly: `evaluate_derived.py` (`derived_features.json`),
+`check_sample_budget.py` (`sample_budget.json`) and `compare_fluence_domain.py` (`fluence_domain.json`).
 
 ---
 
@@ -120,7 +122,7 @@ the response to the reviewers, and each is visible in this repository.
 1. **Partition.** The original pipeline split at the level of individual observations, which places
    repeated measurements of the same mix design on both sides of the boundary. Grouped five-fold
    cross-validation with the pair (cement system, aggregate type) as the grouping key replaces it
-   (`evaluate_P1.py`, `SPLIT=grouped`).
+   (`src/evaluate_P1.py`, `SPLIT=grouped`).
 
 2. **Metrics.** R² had been overwritten by the training-fold cross-validation score while RMSE and MAE
    were test-set quantities, so the three columns of the previous table were not computed on the same
