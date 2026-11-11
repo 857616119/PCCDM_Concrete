@@ -17,3 +17,20 @@ Thumbs.db
 
 # Outputs of the superseded pipeline
 *.png
+
+# Local scratch: one-off editing and plotting scripts, intermediate tables
+_*.py
+_*.tex
+diagnose_*.py
+diagnostic_*
+
+# Never publish: the 800-row interpolated pool of the original submission
+concrete_augmented.csv
+
+# Unrelated side experiments run in this directory
+IDAML*
+Fig[0-9]_*.png
+
+# Source workbook of the NBSDC database: not redistributed, cited by CSTR instead
+data/*.xlsx
+data/processed/*.pkl
