@@ -1,122 +1,144 @@
-# PCCDM: Physics-Constrained Concrete Diffusion Model
+# PCCDM: a physics-constrained conditional diffusion model for irradiated concrete
 
-**PCCDM** is a **physics-constrained diffusion model** specifically designed for concrete materials science. It combines the distribution fidelity of Tabular Denoising Diffusion Probabilistic Models (TabDDPM) with domain-specific macroscopic physical laws. It is designed to address the data augmentation challenges in predicting the performance of irradiated concrete under few-shot scenarios.
+Code and data for the revised manuscript
 
-## 📖 Project Overview
+> Wang, Z., Li, Z., Liu, X. *A physics-constrained diffusion data augmentation approach for strength
+> degradation prediction of nuclear biological shield concrete under limited irradiation data.*
+> Annals of Nuclear Energy, manuscript ANUCENE-D-26-01360 (revised version R1).
 
-In the maintenance of nuclear power infrastructure, acquiring high-quality mechanical performance data for irradiated concrete is extremely costly. Traditional machine learning data augmentation methods (such as SMOTE or Gaussian noise) often ignore internal physical consistency. As a result, the generated "synthetic data," while conforming to statistical distributions, violates physical common sense (e.g., the monotonicity of the water-cement ratio, strength boundaries).
-
-The **PCCDM** proposed in this project introduces a **Differentiable Physics Residual Loss** during the denoising process of the diffusion model, ensuring a perfect balance between statistical fidelity and physical compliance in the generated data.
-
-### ✨ Core Features
-
-* **Physics-Aware Denoising:** Real-time penalization of samples violating macroscopic physical laws (e.g., the negative correlation between the water-cement ratio and strength) during the reverse diffusion process.
-* **SDEdit Generalization Mechanism:** Achieves smooth migration from real data to high-quality synthetic data through shallow noise injection and physical correction.
-* **Monte Carlo Ensemble Sampling:** Employs $M=12$ independent diffusion runs and takes the expected mean to thoroughly eliminate high-frequency physical violation noise.
-* **Multi-Dimensional Evaluation System:** Integrates Wasserstein distance, DCR (Distance to Closest Record), and custom physics residual metrics.
+The archive reproduces every table and figure of Sections 5 and 6 of the revised manuscript on a single
+CPU core in about two hours. This file maps each script to the table or figure it produces;
+`data/README.md` documents the analysis table.
 
 ---
 
-## 🏗️ Project Structure
+## What the method is, and what it is not
 
-```text
-PCCDM_Concrete/
-├── data/processed/          # Processed dataset (concrete_augmented.csv)
-├── results/
-│   ├── models/              # Trained .pth weight files
-│   └── evaluation/          # Comprehensive JSON evaluation reports
-├── pccdm_model.py           # Core validation script: comparative experiments, physics evaluator, and visualization
-├── train.py                 # Main training program: definition and optimization of the physics-constrained loss function
-├── requirements.txt         # Project dependencies
-└── README.md                # Project documentation
+PCCDM is a conditional diffusion model that generates **one scalar**, the relative compressive strength
+retention of a concrete specimen, conditioned on five measured variables: fast neutron fluence,
+irradiation temperature, water–cement ratio, aggregate–cement ratio and cement type. Two physical penalty
+terms are added to the training objective: an admissible interval on the retention, and a conditional
+monotonicity constraint in fluence and water–cement ratio. The constraints act on training only.
+Generation is an unmodified reverse diffusion from a standard-normal prior, with no projection, clipping
+or rejection of the generated values.
 
-```
+Under the formulation-grouped evaluation used throughout the paper, **no augmentation strategy improves
+downstream accuracy**: every strategy lowers R² relative to training on the measured observations alone,
+and PCCDM lowers it least. This negative result is the main empirical finding of the revision, and the
+code reproduces it rather than a favourable one.
 
-## 🚀 Quick Start
+The numbers in the original submission (R² ≈ 0.80) came from a random split at the level of individual
+observations and from a baseline trained on an interpolated pool. Both are described under
+*What changed relative to the original submission* below, and neither is reproduced here.
 
-### 1. Environment Configuration
+---
 
-Recommended environment: Python 3.8+ and PyTorch 2.0+.
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `pccdm_model.py` | conditional residual denoiser, diffusion sampler, physics evaluator |
+| `train.py` | training loop, physics loss terms, dataset wrapper |
+| `augment.py` | data augmentation entry point |
+| `evaluate_P1.py` | downstream comparison of five augmentation strategies, grouped and random splits, 10 repetitions |
+| `evaluate_ablation.py` | component ablation and the three-predictor comparison |
+| `evaluate_physics.py` | constraint residual, violation rate, Wasserstein distance, measured-data reference |
+| `evaluate_derived.py` | ablation of the derived physics features |
+| `evaluate_memorization.py` | exact and near copy rates, nearest-neighbour distance ratio, coverage, KS statistic |
+| `evaluate_life.py` | Section 6 fluence integral, monotone prediction, bootstrap interval, threshold sweep |
+| `compare_fluence_domain.py` | measured retention by fluence interval, the temperature confound, and the within-formulation comparison (Section 6.3, Table 11) |
+| `check_sample_budget.py` | sample counts per fold and the out-of-band rate of the generated values (Section 4.7) |
+| `data/processed/concrete_processed.csv` | the 239 measured observations (analysis table) |
+| `data/processed/concrete_processed_with_physics_features.csv` | same rows with the derived indicators, used only by `evaluate_derived.py` |
+| `results/r1/*.json` | outputs of the runs reported in the manuscript |
+
+---
+
+## Data
+
+The 239 observations come from the database *Dataset of concrete material properties under neutron
+irradiation and high temperature environments*, National Basic Science Data Center (NBSDC) of China,
+permanent identifier **CSTR:16666.11.nbsdc.zMXRoDX8**, version 1.0 (2024-11-29).
+
+The NBSDC workbook is distributed under NBSDC's own access terms and is **not** redistributed here.
+`data/processed/concrete_processed.csv` is the analysis table derived from it: 12 columns, 239 rows,
+documented column by column in `data/README.md`. The two files under `data/processed/` are row-aligned, and
+the second adds the eight derived indicators used in the ablation of Table 6.
+
+The dataset contains **no interpolated or synthetic rows**. A file of 800 interpolated rows shipped with
+the original submission (`concrete_augmented.csv`) has been removed; it is not used anywhere in the
+revised results.
+
+---
+
+## Environment
+
+Python 3.12 with the versions pinned in `requirements.txt` (PyTorch 2.8 CPU build, LightGBM 4.6,
+scikit-learn 1.5). No GPU is required; every experiment runs on one core with `OMP_NUM_THREADS=1`
+and `torch.set_num_threads(1)`.
 
 ```bash
+python -m venv .venv
+. .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
 ```
 
-### 2. Model Training
+---
 
-Run `train.py` to start training the physics-constrained diffusion model. The model will automatically perform outlier cleaning and save the weights to `results/models/`.
+## Reproducing the results
 
-```bash
-python train.py
+All randomness is seeded from `SEED_BASE = 20261106` with the repetition index added, so the runs below
+are deterministic. Run from the repository root.
 
-```
+| Command | Produces | Section | Runtime |
+| --- | --- | --- | --- |
+| `N_REPEATS=10 SPLIT=grouped python evaluate_P1.py` | Table 4, Figures 5–6 | 5.2 | 9 min |
+| `N_REPEATS=10 SPLIT=random python evaluate_P1.py` | random-split rows of Table 4 | 5.2 | 9 min |
+| `N_REPEATS=10 python evaluate_ablation.py` | Tables 5 and 7 | 5.6 | 78 min |
+| `N_REPEATS=10 python evaluate_physics.py` | Table 8 | 5.4 | 2 min |
+| `python evaluate_derived.py` | Table 6 | 5.6 | 1 min |
+| `N_REPEATS=10 python evaluate_memorization.py` | Table 9 | 5.7 | 10 min |
+| `python evaluate_life.py` | Tables 10 and 12, Figure 7 | 6 | 1 min |
+| `python compare_fluence_domain.py` | Table 11, numbers in Section 6.3 | 6.3 | 1 min |
+| `python check_sample_budget.py` | numbers quoted in Section 4.7 | 4.7 | 2 min |
 
-### 3. Downstream Validation and Comparative Experiments
+Each script writes a JSON file to the working directory; the copies in `results/r1/` are the outputs
+behind the published numbers. `evaluate_ablation.py` writes a progress file after every repetition and can
+be interrupted and resumed.
 
-Run `pccdm_model.py` to execute the full comparative experiment suite (including Baseline, Gaussian, SMOTE, TabDDPM, PCCDM). This script will automatically generate publication-ready evaluation charts.
+The ablation dominates the wall time. Two scripts were re-run from a clean checkout of the tagged version
+after the release tree was assembled, and both reproduce the archived JSON exactly: `evaluate_derived.py`
+(`derived_features.json`) and `check_sample_budget.py` (`sample_budget.json`).
 
-```bash
-python pccdm_model.py
+---
 
-```
+## What changed relative to the original submission
 
-## 🔬 Methodology and Physics Constraints
+The code and the results of the first submission were superseded in four respects. Each is documented in
+the response to the reviewers, and each is visible in this repository.
 
-The loss function of PCCDM consists of two parts:
+1. **Partition.** The original pipeline split at the level of individual observations, which places
+   repeated measurements of the same mix design on both sides of the boundary. Grouped five-fold
+   cross-validation with the pair (cement system, aggregate type) as the grouping key replaces it
+   (`evaluate_P1.py`, `SPLIT=grouped`).
 
-$$L_{total} = L_{MSE} + \lambda \cdot L_{physics}$$
+2. **Metrics.** R² had been overwritten by the training-fold cross-validation score while RMSE and MAE
+   were test-set quantities, so the three columns of the previous table were not computed on the same
+   data. Metrics are now computed on pooled out-of-fold predictions; `metrics['R2_trainCV']` is retained in
+   the code for reference and is not reported.
 
-Where $L_{physics}$ includes the following hard constraints:
+3. **Sampling.** The original pipeline started the reverse process from a perturbed measured observation
+   (SDEdit). The reported results now sample from the prior. The comparison is in
+   `evaluate_ablation.py` (`A4`): SDEdit lowers downstream R² by 0.35 (p = 0.002).
 
-* **Absolute Boundary Constraint:** Ensures the relative compressive strength falls within the physically reasonable range of $[0.1, 2.0]$.
-* **Macroscopic Monotonicity Constraint:**
-* **Water-Cement Ratio (W/C):** Strictly prohibits an abnormal surge in strength when the water-cement ratio increases significantly.
-* **Neutron Flux Attenuation:** Strictly prohibits anomalous strength growth when fast neutron flux increases.
+4. **Objective.** The feature-consistency term of the original Equation 11 has no counterpart in the
+   implementation, because the generator emits a scalar rather than a feature vector. It has been removed
+   from both the manuscript and the code; the objective is the boundary term plus the monotonicity term.
 
+---
 
-* **Technical Highlight:** We implemented **Random Pairwise Comparison** within the batch to enable differentiable computation of the monotonicity constraint, avoiding gradient discontinuities caused by traditional sorting operations.
+## License
 
-## 📊 Experimental Results
-
-This framework compared several SOTA data augmentation methods in the downstream GBDT prediction task:
-
-| Method | R² Score ↑ | RMSE ↓ | Physics Constraint Residual ↓ | WD Distance ↓ |
-| --- | --- | --- | --- | --- |
-| Baseline (No Augmentation) | 0.78xx | 0.12xx | - | - |
-| Gaussian Noise | 0.81xx | 0.11xx | High | Low |
-| SMOTE | 0.83xx | 0.10xx | Medium | Medium |
-| TabDDPM | 0.85xx | 0.09xx | Low | Low |
-| **PCCDM (Ours)** | **0.89xx** | **0.08xx** | **Minimal** | **Lowest** |
-
-*(Note: Please refer to the console output generated after running `pccdm_model.py` for specific numerical values)*
-
-## 🛠️ Dependencies
-
-Main dependency libraries:
-
-* `torch >= 2.0`
-* `scikit-learn >= 1.3`
-* `xgboost`, `lightgbm`
-* `imbalanced-learn`
-* `matplotlib`, `seaborn`
-
-## 📝 Citation
-
-If you use the code or methods of this project in your research, please consider citing:
-
-```bibtex
-@misc{pccdm2026,
-  author = {Zhe Wang and Lixuan Yao and Peng Shi},
-  title = {Physics-Constrained Diffusion Model for Irradiated Concrete Data Augmentation},
-  year = {2026},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/your-repo/PCCDM_Concrete}}
-}
-
-```
-
-## ⚖️ License
-
-This project is licensed under the MIT License. See the LICENSE file for details.
+Code released under the MIT license (`LICENSE`). The analysis table is derived from NBSDC data and is
+provided for verification of this manuscript; the terms of the NBSDC database take precedence for any
+reuse of the underlying records.
